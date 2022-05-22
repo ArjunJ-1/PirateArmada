@@ -6,19 +6,19 @@
 #include "GasCloud.h"
 #include "GameFramework/Actor.h"
 #include "DNA.h"
-#include "Boid.generated.h"
+#include "Pirate.generated.h"
+
 
 class USphereComponent;
 class AShipSpawner;
-
 UCLASS()
-class PIRATEARMADA_API ABoid : public AActor
+class PIRATEARMADA_API APirate : public AActor
 {
 	GENERATED_BODY()
 	
 public:	
 	// Sets default values for this actor's properties
-	ABoid();
+	APirate();
 
 protected:
 	// Called when the game starts or when spawned
@@ -46,27 +46,28 @@ public:
 	//the ships rotation
 	FRotator CurrentRotation;
 	void UpdateMeshRotation();
-
+	
+	//apply to the ship and update movement
+	virtual void FlightPath(float DeltaTime);
 	//Avoid crowding/collision with local Ships
 	FVector	AvoidShips(TArray<AActor*> Flock);
 	//return force directed towards the average heading of local Ships
 	FVector VelocityMatching(TArray<AActor*> Flock);
 	//return force directed toward the average position of local Ships
 	FVector FlockCentering(TArray<AActor*> Flock);
-	//apply to the ship and update movement
-	virtual void FlightPath(float DeltaTime);
 	//checks if the ship is on a collision course with obstacle
 	bool IsObstacleAhead();
 	//return obstacle avoidance force steering towards the unobstructed direction
 	FVector AvoidObstacle();
-	//return predator avoidance force steering away from predator
-	FVector AvoidPredator(TArray<AActor*> Flock);
+	//Chase harvester ship to plunder them
+	FVector ChaseShip(TArray<AActor*> Flock);
 
 	protected:
 	//list of forces
 	TArray<FVector> GasCloudForces;
-	float MinSpeed = 300.0f;
-	float MaxSpeed = 600.0f;
+	// Speed HardCoded to 550
+	float MinSpeed = 550.0f;
+	float MaxSpeed = 550.0f;
 	
 public:
 	float TimeAlive; // How long has the boid been alive for (Used to calculate the fitness score)
@@ -76,14 +77,14 @@ public:
 	float CenteringStrength = 0.5f;
 	float AvoidanceStrength = 10000.0f;
 	float GasCloudStrength = 1.0f;
-	float SpeedStrength = 5000.f;
-	float RunAwayStrength = 10000.0f;
+	float ChaseStrength = 20000.0f;
 
 	//Vision and Spawn Invincibility
 	float SeparationFOV = -1.0f;
 	float AlignmentFOV = 0.5f;
 	float CohesionFOV = -0.5f;
 	float Invincibility = 5.f;
+	float ChaseFOV = 0.5f;
 	
 	//avoidance sensors
 	TArray<FVector> AvoidanceSensors;
@@ -106,4 +107,7 @@ public:
 	virtual void SetDNA();
 	virtual void CalculateAndStoreFitness(float alteration);
 	DNA shipDNA;
+
+	// Pause the movements
+	float TimeOut = 0.0f;
 };

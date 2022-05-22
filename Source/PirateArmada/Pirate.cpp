@@ -1,20 +1,18 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Boid.h"
+#include "Pirate.h"
 #include "Components/SphereComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 #include "ShipSpawner.h"
-#include "Engine/StaticMeshActor.h"
 #include "Kismet/GameplayStatics.h"
 
 // Sets default values
-ABoid::ABoid()
+APirate::APirate()
 {
  	// Set this actor to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
-
 	//setup boid mesh component & attach to root
 	BoidMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Boid Mesh Component"));
 	RootComponent = BoidMesh;
@@ -64,7 +62,7 @@ ABoid::ABoid()
 }
 
 // Called when the game starts or when spawned
-void ABoid::BeginPlay()
+void APirate::BeginPlay()
 {
 	Super::BeginPlay();
 	//set velocity based on spawn rotation and flock speed settings
@@ -72,33 +70,25 @@ void ABoid::BeginPlay()
 	BoidVelocity.Normalize();
 	BoidVelocity *= FMath::FRandRange(MinSpeed, MaxSpeed);
 
-	BoidCollision->OnComponentBeginOverlap.AddDynamic(this, &ABoid::OnHitboxOverlapBegin);
-	BoidCollision->OnComponentEndOverlap.AddDynamic(this, &ABoid::OnHitboxOverlapEnd);
+	BoidCollision->OnComponentBeginOverlap.AddDynamic(this, &APirate::OnHitboxOverlapBegin);
+	BoidCollision->OnComponentEndOverlap.AddDynamic(this, &APirate::OnHitboxOverlapEnd);
 	
 	//set current mesh rotation
 	CurrentRotation = this->GetActorRotation();
 }
 
 // Called every frame
-void ABoid::Tick(float DeltaTime)
+void APirate::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-
 	// Incentive on being alive
 	TimeAlive += DeltaTime;
-	CalculateAndStoreFitness(DeltaTime * 10);
+	CalculateAndStoreFitness(DeltaTime);
 	//move ship
 	FlightPath(DeltaTime);
 	
 	//update ship mesh rotation
 	UpdateMeshRotation();
-
-	if(CollisionCloud != nullptr)
-	{
-		GoldCollected += CollisionCloud->RemoveGold();
-		// Incentive to collect gold
-		CalculateAndStoreFitness(1);
-	}
 
 	if(Invincibility > 0)
 	{
@@ -106,42 +96,39 @@ void ABoid::Tick(float DeltaTime)
 	}
 }
 
-void ABoid::UpdateMeshRotation()
+void APirate::UpdateMeshRotation()
 {
 	//rotate toward current boid heading smoothly
 	CurrentRotation = FMath::RInterpTo(CurrentRotation, this->GetActorRotation(), GetWorld()->DeltaTimeSeconds, 7.0f);
 	this->BoidMesh->SetWorldRotation(CurrentRotation);
 }
 
-//-------------------------------------Lab 8 Starts Here---------------------------------------------------------------
-
-// Predicate to overload operator () to compare heap values
-
-
-void ABoid::FlightPath(float DeltaTime)
+void APirate::FlightPath(float DeltaTime)
 {
+	// Pause the ship on timeout
+	if(TimeOut > 0.5)
+	{
+		TimeOut -= DeltaTime;
+		return;
+	}
+	
 	FVector Acceleration = FVector::ZeroVector;
 
 	// update position and rotation
 	SetActorLocation(GetActorLocation() + (BoidVelocity * DeltaTime));
 	SetActorRotation(BoidVelocity.ToOrientationQuat());
 
-	// Get all nearby harvesters
+	// Get all the nearby pirates
 	TArray<AActor*> NearbyShips;
-	PerceptionSensor->GetOverlappingActors(NearbyShips, TSubclassOf<ABoid>());
-	// Get all nearby pirates
-	TArray<AActor*> NearbyPirates;
 	PerceptionSensor->GetOverlappingActors(NearbyShips, TSubclassOf<APirate>());
-
-	// Punish the Boids for being alone
-	if(NearbyShips.Num() == 0)
-		CalculateAndStoreFitness(-DeltaTime);
+	// Get all the nearby Harvesters
+	TArray<AActor*> NearbyHarvesters;
+	PerceptionSensor->GetOverlappingActors(NearbyHarvesters, TSubclassOf<ABoid>());
 	
 	Acceleration += AvoidShips(NearbyShips);
 	Acceleration += VelocityMatching(NearbyShips);
 	Acceleration += FlockCentering(NearbyShips);
-	// Accelerate away from the pirates
-	Acceleration += AvoidPredator(NearbyPirates);
+	Acceleration += ChaseShip(NearbyHarvesters);
 	if(IsObstacleAhead())
 		Acceleration += AvoidObstacle();
 	
@@ -153,6 +140,7 @@ void ABoid::FlightPath(float DeltaTime)
 			GasCloudForces.Add(Force);
 	}
 	
+
 	for(FVector GasCloudForce : GasCloudForces)
 	{
 		GasCloudForce = GasCloudForce.GetSafeNormal() * GasCloudStrength;
@@ -161,11 +149,13 @@ void ABoid::FlightPath(float DeltaTime)
 	}
 
 	//update velocity
+
 	BoidVelocity += (Acceleration * DeltaTime);
 	BoidVelocity = BoidVelocity.GetClampedToSize(MinSpeed, MaxSpeed);
 }
 
-FVector ABoid::AvoidShips(TArray<AActor*> NearbyShips)
+// Avoid colliding with other pirates
+FVector APirate::AvoidShips(TArray<AActor*> NearbyShips)
 {
 	FVector Steering = FVector::ZeroVector;
 	int ShipCount = 0;
@@ -174,7 +164,7 @@ FVector ABoid::AvoidShips(TArray<AActor*> NearbyShips)
 
 	for(AActor* OverlapActor : NearbyShips)
 	{
-		ABoid* LocalShip = Cast<ABoid>(OverlapActor);
+		APirate* LocalShip = Cast<APirate>(OverlapActor);
 		if(LocalShip != nullptr && LocalShip != this)
 		{
 			// check if the LocalShip is outside perception fov
@@ -208,14 +198,15 @@ FVector ABoid::AvoidShips(TArray<AActor*> NearbyShips)
 	return FVector::ZeroVector;
 }
 
-FVector ABoid::VelocityMatching(TArray<AActor*> NearbyShips)
+// Match the velocity of the pirate flock
+FVector APirate::VelocityMatching(TArray<AActor*> NearbyShips)
 {
 	FVector Steering = FVector::ZeroVector;
 	int ShipCount = 0;
 
 	for (AActor* OverlapActor : NearbyShips)
 	{
-		ABoid* LocalShip = Cast<ABoid>(OverlapActor);
+		APirate* LocalShip = Cast<APirate>(OverlapActor);
 		if(LocalShip != nullptr && LocalShip != this)
 		{
 			if(FVector::DotProduct(GetActorForwardVector(),
@@ -240,7 +231,8 @@ FVector ABoid::VelocityMatching(TArray<AActor*> NearbyShips)
 	return FVector::ZeroVector;
 }
 
-FVector ABoid::FlockCentering(TArray<AActor*> NearbyShips)
+// Try to get to the center of the Pirate flock
+FVector APirate::FlockCentering(TArray<AActor*> NearbyShips)
 {
 	FVector Steering = FVector::ZeroVector;
 	int ShipCount = 0;
@@ -249,7 +241,7 @@ FVector ABoid::FlockCentering(TArray<AActor*> NearbyShips)
 	for (AActor* OverlapActor : NearbyShips)
 	{
 		
-		ABoid* LocalShip = Cast<ABoid>(OverlapActor);
+		APirate* LocalShip = Cast<APirate>(OverlapActor);
 		if(LocalShip != nullptr && LocalShip != this)
 		{
 			if(FVector::DotProduct(GetActorForwardVector(),
@@ -276,7 +268,7 @@ FVector ABoid::FlockCentering(TArray<AActor*> NearbyShips)
 	return FVector::ZeroVector;
 }
 
-FVector ABoid::AvoidObstacle()
+FVector APirate::AvoidObstacle()
 {
 	FVector Steering = FVector::ZeroVector;
 	FQuat SensorRotation = FQuat::FindBetweenVectors(AvoidanceSensors[0], GetActorForwardVector());
@@ -304,52 +296,57 @@ FVector ABoid::AvoidObstacle()
 	return FVector::ZeroVector;
 }
 
-// Avoid the pirate ship 
-FVector ABoid::AvoidPredator(TArray<AActor*> NearbyPirates)
+// Chases the closest harvester ship
+FVector APirate::ChaseShip(TArray<AActor*> NearbyShips)
 {
 	FVector Steering = FVector::ZeroVector;
 	int ShipCount = 0;
 	FVector SeparationDirection = FVector::ZeroVector;
-	float ProximityFactor = 0.0f;
 
-	for(AActor* OverlapActor : NearbyPirates)
+	ABoid* TargetHarvester = nullptr;  // Target Harvester
+	float NearestTargetDistance = 600; // 600 is the perception radius
+	for(AActor* OverlapActor : NearbyShips)
 	{
-		APirate* LocalShip = Cast<APirate>(OverlapActor);
+		ABoid* LocalShip = Cast<ABoid>(OverlapActor);
 		if(LocalShip != nullptr)
 		{
 			// check if the LocalShip is outside perception fov
 			if(FVector::DotProduct(GetActorForwardVector(),
-				(LocalShip->GetActorLocation() - GetActorLocation()).GetSafeNormal()) <= SeparationFOV)
+				(LocalShip->GetActorLocation() - GetActorLocation()).GetSafeNormal()) <= ChaseFOV)
 			{
 				continue; // local ship is outside the perception, disregard it and continue the loop
 			}
-
-			// get normalized direction form nearby Predator
-			SeparationDirection = GetActorLocation() - LocalShip->GetActorLocation();
-			SeparationDirection = SeparationDirection.GetSafeNormal() * 10;
-
-			// add steering force of ship and increase flock count
-			Steering += SeparationDirection;
-			ShipCount++;
+			// Find the closest ship
+			if(FVector::Dist(LocalShip->GetActorLocation(), GetActorLocation()) < NearestTargetDistance)
+			{
+				// give incentive for getting close to the Harvesters (1 for every ship in view)
+				CalculateAndStoreFitness(1);
+				TargetHarvester = LocalShip;
+				NearestTargetDistance = FVector::Dist(LocalShip->GetActorLocation(), GetActorLocation());
+			}
 		}
 	}
 
+	// If we find the Target harvester then steer towards it
+	if (TargetHarvester != nullptr)
+	{
+		// add steering force of ship and increase flock count
+		Steering += TargetHarvester->BoidVelocity.GetSafeNormal();
+		ShipCount++;
+	}
+	
 	if(ShipCount > 0)
 	{
 		// get flock average separation force, apply separation steering strength factor and return force
 		Steering /= ShipCount;
 		Steering.GetSafeNormal() -= BoidVelocity.GetSafeNormal();
-		Steering *= RunAwayStrength;
+		Steering *= ChaseStrength;
 		return Steering;
 	}
 	return FVector::ZeroVector;
 }
 
-
-//------------------------------------------Collision Code---------------------------------------------------------------------------
-
-
-bool ABoid::IsObstacleAhead()
+bool APirate::IsObstacleAhead()
 {
 	if (AvoidanceSensors.Num() > 0)
 	{
@@ -383,7 +380,7 @@ bool ABoid::IsObstacleAhead()
 	return false;
 }
 
-void ABoid::OnHitboxOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+void APirate::OnHitboxOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	if (OtherActor && OtherActor != this)
@@ -396,38 +393,26 @@ void ABoid::OnHitboxOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActo
 				CollisionCloud = cloud;
 				return;
 			}
-
-			// Pirate and Harvester Collide
-			APirate* PirateShip = Cast<APirate>(OtherActor);
-			if (PirateShip != nullptr)
+		
+			APirate* ship = Cast<APirate>(OtherActor);
+			// Two Predators collide
+			if (ship != nullptr)
 			{
-				CalculateAndStoreFitness(-(0.50 * shipDNA.m_storedfitness));     // 50% reduction
-				Cast<APirate>(PirateShip)->TimeOut = 5.5;                               // Pause the predator ship
-				Cast<APirate>(PirateShip)->GoldCollected = GoldCollected;               // Plunder the gold of this ship
-				Cast<APirate>(PirateShip)->CalculateAndStoreFitness(10);        // 10 fitness for every ship destroyed
-
-				Spawner->NumofShips--;
-				Spawner->m_DeadDNA.Add(shipDNA);
-				Destroy();
-				return;
-			}
-			// Two Harvesters collide
-			ABoid* Ship = Cast<ABoid>(OtherActor);
-			if (Ship != nullptr)
-			{
-				Spawner->NumofShips--;
+				Spawner->NumOfPredators--;
 				CalculateAndStoreFitness(-(0.25 * shipDNA.m_storedfitness));// 25% reduction
-				Spawner->m_DeadDNA.Add(shipDNA);
+				Spawner->m_DeadPredatorsDNA.Add(shipDNA);
 				Destroy();
 				return;
 			}
+
 		}
+		// Predator Collides with wall
 		if(OtherActor->GetName().Contains("Cube") &&
 			OverlappedComponent->GetName().Equals(TEXT("Boid Collision Component")))
 		{
 			//UE_LOG(LogTemp, Warning, TEXT("Collector Ship Collided With Wall"));
-			Spawner->NumofShips--;
-			Spawner->m_DeadDNA.Add(shipDNA);
+			Spawner->NumOfPredators--;
+			Spawner->m_DeadPredatorsDNA.Add(shipDNA);
 			CalculateAndStoreFitness(-(0.25 * shipDNA.m_storedfitness)); // 25% reduction
 			Destroy();
 			
@@ -435,7 +420,7 @@ void ABoid::OnHitboxOverlapBegin(UPrimitiveComponent* OverlappedComponent, AActo
 	}
 }
 
-void ABoid::OnHitboxOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+void APirate::OnHitboxOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
 	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
 {
 	AGasCloud* cloud = Cast<AGasCloud>(OtherActor);
@@ -445,20 +430,19 @@ void ABoid::OnHitboxOverlapEnd(UPrimitiveComponent* OverlappedComponent, AActor*
 	}
 }
 
-// Set DNA of the harvester ships
-void ABoid::SetDNA()
+// Pirate DNA Excludes SpeedStrength and includes ChaseStrength
+void APirate::SetDNA()
 {
 	VelocityStrength = shipDNA.StrengthValues[0];
 	SeparationStrength = shipDNA.StrengthValues[1];
 	CenteringStrength = shipDNA.StrengthValues[2];
 	AvoidanceStrength = shipDNA.StrengthValues[3];
 	GasCloudStrength = shipDNA.StrengthValues[4];
-	SpeedStrength = shipDNA.StrengthValues[5];
-	RunAwayStrength = shipDNA.StrengthValues[6];
+	ChaseStrength = shipDNA.StrengthValues[5];
 }
 
-// Calculate and store the fitness of the ship
-void ABoid::CalculateAndStoreFitness(float alteration)
+// Calculates the same way as Harvesters (Boids)
+void APirate::CalculateAndStoreFitness(float alteration)
 {
 	if (shipDNA.m_storedfitness == -1)
 	{
@@ -467,3 +451,4 @@ void ABoid::CalculateAndStoreFitness(float alteration)
 	}
 	shipDNA.m_storedfitness += alteration;
 }
+
