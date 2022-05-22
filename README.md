@@ -11,3 +11,9 @@ The fitness score for each boid is proportional to the time it has been alive fo
 I have also extended the DNA of the harvesters to include RunAwayStrength and a function to increase acceleration in the opposite direction if the harvester encounters any predator in its perception sphere. In addition to the chase function and chase strength implemented for the predators.
 
 Note that both predators and harvesters evolve at the same time, when the population of harvesters is less than 80%. Ensuring the balance of both parties.
+
+# PirateArmada
+
+Boids Algorithm with collision avoidance
+
+WIP to implement evolutionary algorithms to this system of flocks.
